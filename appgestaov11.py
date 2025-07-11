@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 import sqlite3
 import re
-import fitz  # Para leitura de PDFs no backend
+import fitz  # Para leitura interna de PDFs
 
 # Banco de dados SQLite
 conn = sqlite3.connect('document_manager.db', check_same_thread=False)
@@ -122,7 +122,6 @@ elif st.session_state.registration_mode and not st.session_state.authenticated:
             if c.execute("SELECT * FROM users WHERE username=?", (new_user,)).fetchone():
                 st.error("Usuário já existe.")
             else:
-                # Permissões padrão ao criar usuário: upload e view
                 c.execute("INSERT INTO users (username, password, projects, permissions) VALUES (?, ?, ?, ?)",
                           (new_user, new_pass, '', 'upload,view'))
                 conn.commit()
@@ -195,7 +194,7 @@ elif st.session_state.admin_mode and st.session_state.admin_authenticated:
                                       default=projetos_atuais.split(',') if projetos_atuais else [],
                                       key=hash_key(f"proj_{user}"))
             permissoes = st.multiselect(f"Permissões ({user})",
-                                        options=["upload", "download", "view", "rename", "delete"],
+                                        options=["upload", "download", "view"],
                                         default=permissoes_atuais.split(',') if permissoes_atuais else [],
                                         key=hash_key(f"perm_{user}"))
             nova_senha = st.text_input(f"Nova senha ({user})", key=hash_key(f"senha_{user}"))
@@ -314,39 +313,16 @@ elif st.session_state.authenticated:
                                     icon = file_icon(file)
                                     st.markdown(f"- {icon} `{file}`")
 
-                                    # Botões de ação agrupados
-                                    cols = st.columns([1, 1, 1, 1])
-                                    with cols[0]:
-                                        with open(full_path, "rb") as f:
-                                            b64 = base64.b64encode(f.read()).decode("utf-8")
-                                            if file.lower().endswith(".pdf"):
-                                                href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
-                                                if st.button("👁️ Visualizar PDF", key=hash_key("btn_" + full_path)):
-                                                    st.markdown(href, unsafe_allow_html=True)
-                                            f.seek(0)
-                                            if "download" in user_permissions:
-                                                st.download_button("📥 Baixar", f, file_name=file, key=hash_key("dl_" + full_path))
-                                    with cols[1]:
-                                        if "rename" in user_permissions:
-                                            new_name = st.text_input(f"Novo nome para {file}", key=hash_key("rename_input_" + full_path))
-                                            if st.button("✏️ Renomear", key=hash_key("rename_" + full_path)):
-                                                if new_name:
-                                                    new_path = os.path.join(fase_path, new_name)
-                                                    os.rename(full_path, new_path)
-                                                    st.success(f"Arquivo renomeado para `{new_name}`.")
-                                                    log_action(username, "rename", full_path, f"renomeado para {new_name}")
-                                                    st.rerun()
-                                                else:
-                                                    st.warning("Informe o novo nome antes de renomear.")
-                                    with cols[2]:
-                                        if "delete" in user_permissions:
-                                            if st.button("🗑️ Excluir", key=hash_key("delete_" + full_path)):
-                                                os.remove(full_path)
-                                                st.success(f"Arquivo `{file}` excluído.")
-                                                log_action(username, "delete", full_path)
-                                                st.rerun()
+                                    with open(full_path, "rb") as f:
+                                        b64 = base64.b64encode(f.read()).decode("utf-8")
+                                        if file.lower().endswith(".pdf"):
+                                            href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
+                                            if st.button("👁️ Visualizar PDF", key=hash_key("btn_" + full_path)):
+                                                st.markdown(href, unsafe_allow_html=True)
+                                        f.seek(0)
+                                        if "download" in user_permissions:
+                                            st.download_button("📥 Baixar", f, file_name=file, key=hash_key("dl_" + full_path))
 
-                                    # Botão Revisões
                                     nome_base, revisao_atual, versao_atual = extrair_info_arquivo(file)
                                     pasta_revisoes = os.path.join(fase_path, "Revisoes", nome_base)
                                     if os.path.exists(pasta_revisoes):
@@ -422,7 +398,7 @@ elif st.session_state.authenticated:
             else:
                 st.warning("Nenhum arquivo encontrado.")
 
-    # HISTÓRICO DE AÇÕES (sempre disponível após autenticação)
+    # HISTÓRICO DE AÇÕES (sempre disponível para autenticados)
     st.markdown("### 📜 Histórico de Ações")
     if st.checkbox("Mostrar log"):
         logs = c.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 50").fetchall()
