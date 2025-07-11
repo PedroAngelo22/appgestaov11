@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 import sqlite3
 import re
-import fitz  # Para leitura de PDFs
+import fitz
 
 # Banco de dados SQLite
 conn = sqlite3.connect('document_manager.db', check_same_thread=False)
@@ -44,7 +44,6 @@ if "projetos_registrados" not in st.session_state:
 if "clientes_registrados" not in st.session_state:
     st.session_state.clientes_registrados = []
 
-# Utilitários
 def get_project_path(project, discipline, phase):
     path = os.path.join(BASE_DIR, project, discipline, phase)
     os.makedirs(path, exist_ok=True)
@@ -77,7 +76,6 @@ def extrair_info_arquivo(nome_arquivo):
         return nome_base, revisao, versao
     return None, None, None
 
-# Estado da sessão
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "registration_mode" not in st.session_state:
@@ -133,7 +131,7 @@ elif st.session_state.registration_mode and not st.session_state.authenticated:
                 c.execute("INSERT INTO users (username, password, projects, permissions) VALUES (?, ?, ?, ?)",
                           (new_user, new_pass, '', 'upload,view'))
                 conn.commit()
-                st.success("Usuário registrado com sucesso com permissões padrão [upload, view].")
+                st.success("Usuário registrado com permissões padrão [upload, view].")
                 st.session_state.registration_mode = False
                 st.session_state.registration_unlocked = False
                 st.rerun()
@@ -169,7 +167,7 @@ elif st.session_state.admin_mode and st.session_state.admin_authenticated:
         else:
             st.warning("Cliente já existe.")
 
-    st.markdown("### ➕ Cadastrar Projeto / Disciplina / Fase")
+    st.markdown("### ➕ Cadastrar Projeto")
     novo_proj = st.text_input("Novo Projeto")
     clientes = [row[0] for row in c.execute("SELECT name FROM clients").fetchall()]
     cliente_selecionado = st.selectbox("Cliente do Projeto", clientes) if clientes else None
@@ -250,12 +248,12 @@ elif st.session_state.authenticated:
         st.session_state.username = ""
         st.rerun()
 
-    # UPLOAD COM CONTROLE DE REVISÃO, VERSÃO E FEEDBACK
+    # UPLOAD COM CONTROLE DE REVISÃO/ VERSÃO
     if "upload" in user_permissions:
         st.markdown("### ⬆️ Upload de Arquivos")
         with st.form("upload_form"):
             if not user_projects:
-                st.warning("Você ainda não tem projetos atribuídos. Contate o administrador.")
+                st.warning("Você ainda não tem projetos atribuídos.")
             else:
                 project = st.selectbox("Projeto", user_projects)
                 discipline = st.selectbox("Disciplina", st.session_state.disciplinas)
@@ -268,7 +266,7 @@ elif st.session_state.authenticated:
                     if nome_base and revisao and versao:
                         st.info(f"🧠 Detecção automática: `{uploaded_file.name}` → Revisão: **{revisao}**, Versão: **{versao}**")
                     else:
-                        st.error("❌ O nome do arquivo deve conter algo como rXvY (ex: r1v2) para controle de revisão e versão.")
+                        st.error("❌ Nome do arquivo deve conter rXvY (ex: r1v2).")
 
                 submitted = st.form_submit_button("Enviar")
                 if submitted and uploaded_file:
@@ -278,7 +276,7 @@ elif st.session_state.authenticated:
 
                     nome_base, revisao, versao = extrair_info_arquivo(filename)
                     if not nome_base:
-                        st.error("O nome do arquivo deve conter rXvY (ex: r1v2) para controle de revisão e versão.")
+                        st.error("Nome do arquivo deve conter rXvY.")
                     else:
                         arquivos_existentes = os.listdir(path)
                         nomes_existentes = [f for f in arquivos_existentes if f.startswith(nome_base)]
@@ -311,45 +309,75 @@ elif st.session_state.authenticated:
 
                             st.success(f"✅ Arquivo `{filename}` salvo com sucesso.")
                             log_action(username, "upload", file_path)
-    # LINKS RÁPIDOS NA SIDEBAR
+    # NAVEGAÇÃO NA SIDEBAR: "Meus Projetos" e "Meus Clientes"
     st.sidebar.markdown("### 🔎 Navegação Rápida")
+    
     if st.sidebar.button("📁 Meus Projetos"):
-        for project in user_projects:
-            st.markdown(f"## 📁 Projeto: {project}")
-            project_path = os.path.join(BASE_DIR, project)
-            for root, dirs, files in os.walk(project_path):
-                for file in files:
-                    full_path = os.path.join(root, file)
-                    if os.path.isdir(full_path): continue
-                    st.markdown(f"- `{os.path.relpath(full_path, BASE_DIR)}`")
-
-    if st.sidebar.button("🏢 Meus Clientes"):
-        meus_clientes = set()
-        for project in user_projects:
-            res = c.execute("SELECT client FROM projects WHERE name=?", (project,)).fetchone()
-            if res:
-                meus_clientes.add(res[0])
-        for cliente in meus_clientes:
-            st.markdown(f"## 🏢 Cliente: {cliente}")
-            projetos_cliente = [p[0] for p in c.execute("SELECT name FROM projects WHERE client=?", (cliente,)).fetchall()]
-            for proj in projetos_cliente:
-                proj_path = os.path.join(BASE_DIR, proj)
-                for root, dirs, files in os.walk(proj_path):
-                    for file in files:
-                        full_path = os.path.join(root, file)
-                        if os.path.isdir(full_path): continue
-                        st.markdown(f"- `{os.path.relpath(full_path, BASE_DIR)}`")
-
-    # VISUALIZAÇÃO HIERÁRQUICA NORMAL
-    if "download" in user_permissions or "view" in user_permissions:
-        st.markdown("### 📂 Navegação por Projetos")
-
-        for proj in sorted(os.listdir(BASE_DIR)):
+        for proj in sorted(user_projects):
             proj_path = os.path.join(BASE_DIR, proj)
             if not os.path.isdir(proj_path): continue
 
+            with st.expander(f"📁 Projeto: {proj}", expanded=False):
+                for disc in sorted(os.listdir(proj_path)):
+                    disc_path = os.path.join(proj_path, disc)
+                    if not os.path.isdir(disc_path): continue
+
+                    with st.expander(f"📂 Disciplina: {disc}", expanded=False):
+                        for fase in sorted(os.listdir(disc_path)):
+                            fase_path = os.path.join(disc_path, fase)
+                            if not os.path.isdir(fase_path): continue
+
+                            with st.expander(f"📄 Fase: {fase}", expanded=False):
+                                for file in sorted(os.listdir(fase_path)):
+                                    full_path = os.path.join(fase_path, file)
+                                    if os.path.isdir(full_path): continue
+
+                                    icon = file_icon(file)
+                                    st.markdown(f"- {icon} `{file}`")
+
+    if st.sidebar.button("🏢 Meus Clientes"):
+        meus_clientes = set()
+        for proj in user_projects:
+            res = c.execute("SELECT client FROM projects WHERE name=?", (proj,)).fetchone()
+            if res:
+                meus_clientes.add(res[0])
+
+        for cliente in sorted(meus_clientes):
+            with st.expander(f"🏢 Cliente: {cliente}", expanded=False):
+                projetos_cliente = [p[0] for p in c.execute("SELECT name FROM projects WHERE client=?", (cliente,)).fetchall()]
+                projetos_cliente = [p for p in projetos_cliente if p in user_projects]
+                for proj in sorted(projetos_cliente):
+                    proj_path = os.path.join(BASE_DIR, proj)
+                    if not os.path.isdir(proj_path): continue
+
+                    with st.expander(f"📁 Projeto: {proj}", expanded=False):
+                        for disc in sorted(os.listdir(proj_path)):
+                            disc_path = os.path.join(proj_path, disc)
+                            if not os.path.isdir(disc_path): continue
+
+                            with st.expander(f"📂 Disciplina: {disc}", expanded=False):
+                                for fase in sorted(os.listdir(disc_path)):
+                                    fase_path = os.path.join(disc_path, fase)
+                                    if not os.path.isdir(fase_path): continue
+
+                                    with st.expander(f"📄 Fase: {fase}", expanded=False):
+                                        for file in sorted(os.listdir(fase_path)):
+                                            full_path = os.path.join(fase_path, file)
+                                            if os.path.isdir(full_path): continue
+
+                                            icon = file_icon(file)
+                                            st.markdown(f"- {icon} `{file}`")
+
+    # VISUALIZAÇÃO PADRÃO POR PROJETO (hierarquia completa)
+    if "download" in user_permissions or "view" in user_permissions:
+        st.markdown("### 📂 Navegação Completa")
+
+        for proj in sorted(os.listdir(BASE_DIR)):
             if proj not in user_projects:
-                continue  # Mostra apenas projetos atribuídos ao usuário
+                continue
+
+            proj_path = os.path.join(BASE_DIR, proj)
+            if not os.path.isdir(proj_path): continue
 
             with st.expander(f"📁 Projeto: {proj}", expanded=False):
                 for disc in sorted(os.listdir(proj_path)):
@@ -378,28 +406,6 @@ elif st.session_state.authenticated:
                                         f.seek(0)
                                         if "download" in user_permissions:
                                             st.download_button("📥 Baixar", f, file_name=file, key=hash_key("dl_" + full_path))
-
-                                    nome_base, revisao_atual, versao_atual = extrair_info_arquivo(file)
-                                    pasta_revisoes = os.path.join(fase_path, "Revisoes", nome_base)
-                                    if os.path.exists(pasta_revisoes):
-                                        revisoes_antigas = sorted(os.listdir(pasta_revisoes))
-                                        if revisoes_antigas:
-                                            with st.expander("⬅️ Revisões anteriores"):
-                                                for rev_file in revisoes_antigas:
-                                                    rev_path = os.path.join(pasta_revisoes, rev_file)
-                                                    if os.path.isdir(rev_path): continue
-                                                    st.markdown(f"• `{rev_file}`")
-                                                    with open(rev_path, "rb") as rf:
-                                                        b64_rev = base64.b64encode(rf.read()).decode("utf-8")
-                                                        if rev_file.lower().endswith(".pdf"):
-                                                            href_rev = f'<a href="data:application/pdf;base64,{b64_rev}" target="_blank">👁️ Visualizar PDF</a>'
-                                                            if st.button("👁️ Visualizar PDF", key=hash_key("btn_rev_" + rev_path)):
-                                                                st.markdown(href_rev, unsafe_allow_html=True)
-                                                        rf.seek(0)
-                                                        if "download" in user_permissions:
-                                                            st.download_button("📥 Baixar", rf, file_name=rev_file, key=hash_key("dl_rev_" + rev_path))
-
-                                    log_action(username, "visualizar", full_path)
     # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
     if "download" in user_permissions or "view" in user_permissions:
         st.markdown("### 🔍 Pesquisa de Documentos")
@@ -412,7 +418,6 @@ elif st.session_state.authenticated:
                     if not os.path.isfile(full_path):
                         continue
 
-                    # Apenas arquivos nos projetos do usuário
                     rel_path_parts = os.path.relpath(full_path, BASE_DIR).split(os.sep)
                     if rel_path_parts[0] not in user_projects:
                         continue
@@ -459,7 +464,7 @@ elif st.session_state.authenticated:
             else:
                 st.warning("Nenhum arquivo encontrado.")
 
-    # HISTÓRICO DE AÇÕES (sempre disponível)
+    # HISTÓRICO DE AÇÕES (disponível para usuários autenticados)
     st.markdown("### 📜 Histórico de Ações")
     if st.checkbox("Mostrar log"):
         logs = c.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 50").fetchall()
