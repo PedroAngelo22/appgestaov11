@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 import sqlite3
 import re
-import fitz  # Para leitura interna de PDFs
+import fitz  # Para leitura de PDFs
 
 # Banco de dados SQLite
 conn = sqlite3.connect('document_manager.db', check_same_thread=False)
@@ -23,18 +23,26 @@ c.execute('''CREATE TABLE IF NOT EXISTS logs (
     action TEXT,
     file TEXT
 )''')
+c.execute('''CREATE TABLE IF NOT EXISTS clients (
+    name TEXT PRIMARY KEY
+)''')
+c.execute('''CREATE TABLE IF NOT EXISTS projects (
+    name TEXT PRIMARY KEY,
+    client TEXT
+)''')
 conn.commit()
 
 BASE_DIR = "uploads"
 os.makedirs(BASE_DIR, exist_ok=True)
 
-# Disciplinas, fases e projetos padrão
 if "disciplinas" not in st.session_state:
     st.session_state.disciplinas = ["GES", "PRO", "MEC", "MET", "CIV", "ELE", "AEI"]
 if "fases" not in st.session_state:
     st.session_state.fases = ["FEL1", "FEL2", "FEL3", "Executivo"]
 if "projetos_registrados" not in st.session_state:
     st.session_state.projetos_registrados = []
+if "clientes_registrados" not in st.session_state:
+    st.session_state.clientes_registrados = []
 
 # Utilitários
 def get_project_path(project, discipline, phase):
@@ -151,12 +159,27 @@ elif st.session_state.admin_mode and not st.session_state.admin_authenticated:
 elif st.session_state.admin_mode and st.session_state.admin_authenticated:
     st.subheader("Painel Administrativo")
 
+    st.markdown("### ➕ Cadastrar Cliente")
+    novo_cliente = st.text_input("Novo Cliente")
+    if st.button("Adicionar Cliente") and novo_cliente:
+        if not c.execute("SELECT * FROM clients WHERE name=?", (novo_cliente,)).fetchone():
+            c.execute("INSERT INTO clients (name) VALUES (?)", (novo_cliente,))
+            conn.commit()
+            st.success(f"Cliente '{novo_cliente}' adicionado.")
+        else:
+            st.warning("Cliente já existe.")
+
     st.markdown("### ➕ Cadastrar Projeto / Disciplina / Fase")
     novo_proj = st.text_input("Novo Projeto")
-    if st.button("Adicionar Projeto") and novo_proj:
-        if novo_proj not in st.session_state.projetos_registrados:
+    clientes = [row[0] for row in c.execute("SELECT name FROM clients").fetchall()]
+    cliente_selecionado = st.selectbox("Cliente do Projeto", clientes) if clientes else None
+
+    if st.button("Adicionar Projeto") and novo_proj and cliente_selecionado:
+        if not c.execute("SELECT * FROM projects WHERE name=?", (novo_proj,)).fetchone():
+            c.execute("INSERT INTO projects (name, client) VALUES (?, ?)", (novo_proj, cliente_selecionado))
+            conn.commit()
             st.session_state.projetos_registrados.append(novo_proj)
-            st.success(f"Projeto '{novo_proj}' adicionado.")
+            st.success(f"Projeto '{novo_proj}' vinculado ao cliente '{cliente_selecionado}' adicionado.")
         else:
             st.warning("Projeto já existe.")
 
@@ -190,7 +213,8 @@ elif st.session_state.admin_mode and st.session_state.admin_authenticated:
                 st.success(f"Usuário {user} removido.")
                 st.rerun()
         with col2:
-            projetos = st.multiselect(f"Projetos ({user})", options=st.session_state.projetos_registrados,
+            projetos = st.multiselect(f"Projetos ({user})",
+                                      options=[p[0] for p in c.execute("SELECT name FROM projects").fetchall()],
                                       default=projetos_atuais.split(',') if projetos_atuais else [],
                                       key=hash_key(f"proj_{user}"))
             permissoes = st.multiselect(f"Permissões ({user})",
@@ -287,13 +311,45 @@ elif st.session_state.authenticated:
 
                             st.success(f"✅ Arquivo `{filename}` salvo com sucesso.")
                             log_action(username, "upload", file_path)
-    # VISUALIZAÇÃO HIERÁRQUICA DOS DOCUMENTOS
+    # LINKS RÁPIDOS NA SIDEBAR
+    st.sidebar.markdown("### 🔎 Navegação Rápida")
+    if st.sidebar.button("📁 Meus Projetos"):
+        for project in user_projects:
+            st.markdown(f"## 📁 Projeto: {project}")
+            project_path = os.path.join(BASE_DIR, project)
+            for root, dirs, files in os.walk(project_path):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    if os.path.isdir(full_path): continue
+                    st.markdown(f"- `{os.path.relpath(full_path, BASE_DIR)}`")
+
+    if st.sidebar.button("🏢 Meus Clientes"):
+        meus_clientes = set()
+        for project in user_projects:
+            res = c.execute("SELECT client FROM projects WHERE name=?", (project,)).fetchone()
+            if res:
+                meus_clientes.add(res[0])
+        for cliente in meus_clientes:
+            st.markdown(f"## 🏢 Cliente: {cliente}")
+            projetos_cliente = [p[0] for p in c.execute("SELECT name FROM projects WHERE client=?", (cliente,)).fetchall()]
+            for proj in projetos_cliente:
+                proj_path = os.path.join(BASE_DIR, proj)
+                for root, dirs, files in os.walk(proj_path):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        if os.path.isdir(full_path): continue
+                        st.markdown(f"- `{os.path.relpath(full_path, BASE_DIR)}`")
+
+    # VISUALIZAÇÃO HIERÁRQUICA NORMAL
     if "download" in user_permissions or "view" in user_permissions:
         st.markdown("### 📂 Navegação por Projetos")
 
         for proj in sorted(os.listdir(BASE_DIR)):
             proj_path = os.path.join(BASE_DIR, proj)
             if not os.path.isdir(proj_path): continue
+
+            if proj not in user_projects:
+                continue  # Mostra apenas projetos atribuídos ao usuário
 
             with st.expander(f"📁 Projeto: {proj}", expanded=False):
                 for disc in sorted(os.listdir(proj_path)):
@@ -356,6 +412,11 @@ elif st.session_state.authenticated:
                     if not os.path.isfile(full_path):
                         continue
 
+                    # Apenas arquivos nos projetos do usuário
+                    rel_path_parts = os.path.relpath(full_path, BASE_DIR).split(os.sep)
+                    if rel_path_parts[0] not in user_projects:
+                        continue
+
                     match_found = False
                     if keyword.lower() in file.lower():
                         match_found = True
@@ -398,7 +459,7 @@ elif st.session_state.authenticated:
             else:
                 st.warning("Nenhum arquivo encontrado.")
 
-    # HISTÓRICO DE AÇÕES (sempre disponível para autenticados)
+    # HISTÓRICO DE AÇÕES (sempre disponível)
     st.markdown("### 📜 Histórico de Ações")
     if st.checkbox("Mostrar log"):
         logs = c.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 50").fetchall()
