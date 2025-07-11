@@ -248,7 +248,7 @@ elif st.session_state.authenticated:
         st.session_state.username = ""
         st.rerun()
 
-    # UPLOAD COM CONTROLE DE REVISÃO/ VERSÃO
+    # UPLOAD
     if "upload" in user_permissions:
         st.markdown("### ⬆️ Upload de Arquivos")
         with st.form("upload_form"):
@@ -332,8 +332,16 @@ elif st.session_state.authenticated:
                                     full_path = os.path.join(fase_path, file)
                                     if os.path.isdir(full_path): continue
 
-                                    icon = file_icon(file)
-                                    st.markdown(f"- {icon} `{file}`")
+                                    st.markdown(f"- `{file}`")
+                                    with open(full_path, "rb") as f:
+                                        if file.lower().endswith(".pdf"):
+                                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                                            href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
+                                            if st.button("👁️ Visualizar PDF", key=hash_key(f"proj_btn_{full_path}")):
+                                                st.markdown(href, unsafe_allow_html=True)
+                                        f.seek(0)
+                                        if "download" in user_permissions:
+                                            st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"proj_dl_{full_path}"))
 
     if st.sidebar.button("🏢 Meus Clientes"):
         meus_clientes = set()
@@ -365,47 +373,16 @@ elif st.session_state.authenticated:
                                             full_path = os.path.join(fase_path, file)
                                             if os.path.isdir(full_path): continue
 
-                                            icon = file_icon(file)
-                                            st.markdown(f"- {icon} `{file}`")
-
-    # VISUALIZAÇÃO PADRÃO POR PROJETO (hierarquia completa)
-    if "download" in user_permissions or "view" in user_permissions:
-        st.markdown("### 📂 Navegação Completa")
-
-        for proj in sorted(os.listdir(BASE_DIR)):
-            if proj not in user_projects:
-                continue
-
-            proj_path = os.path.join(BASE_DIR, proj)
-            if not os.path.isdir(proj_path): continue
-
-            with st.expander(f"📁 Projeto: {proj}", expanded=False):
-                for disc in sorted(os.listdir(proj_path)):
-                    disc_path = os.path.join(proj_path, disc)
-                    if not os.path.isdir(disc_path): continue
-
-                    with st.expander(f"📂 Disciplina: {disc}", expanded=False):
-                        for fase in sorted(os.listdir(disc_path)):
-                            fase_path = os.path.join(disc_path, fase)
-                            if not os.path.isdir(fase_path): continue
-
-                            with st.expander(f"📄 Fase: {fase}", expanded=False):
-                                for file in sorted(os.listdir(fase_path)):
-                                    full_path = os.path.join(fase_path, file)
-                                    if os.path.isdir(full_path): continue
-
-                                    icon = file_icon(file)
-                                    st.markdown(f"- {icon} `{file}`")
-
-                                    with open(full_path, "rb") as f:
-                                        b64 = base64.b64encode(f.read()).decode("utf-8")
-                                        if file.lower().endswith(".pdf"):
-                                            href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
-                                            if st.button("👁️ Visualizar PDF", key=hash_key("btn_" + full_path)):
-                                                st.markdown(href, unsafe_allow_html=True)
-                                        f.seek(0)
-                                        if "download" in user_permissions:
-                                            st.download_button("📥 Baixar", f, file_name=file, key=hash_key("dl_" + full_path))
+                                            st.markdown(f"- `{file}`")
+                                            with open(full_path, "rb") as f:
+                                                if file.lower().endswith(".pdf"):
+                                                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                                                    href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
+                                                    if st.button("👁️ Visualizar PDF", key=hash_key(f"cli_btn_{full_path}")):
+                                                        st.markdown(href, unsafe_allow_html=True)
+                                                f.seek(0)
+                                                if "download" in user_permissions:
+                                                    st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"cli_dl_{full_path}"))
     # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
     if "download" in user_permissions or "view" in user_permissions:
         st.markdown("### 🔍 Pesquisa de Documentos")
@@ -464,7 +441,7 @@ elif st.session_state.authenticated:
             else:
                 st.warning("Nenhum arquivo encontrado.")
 
-    # HISTÓRICO DE AÇÕES (disponível para usuários autenticados)
+    # HISTÓRICO DE AÇÕES (disponível para autenticados)
     st.markdown("### 📜 Histórico de Ações")
     if st.checkbox("Mostrar log"):
         logs = c.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 50").fetchall()
